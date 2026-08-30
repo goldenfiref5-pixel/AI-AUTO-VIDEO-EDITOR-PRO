@@ -259,6 +259,8 @@ export interface Job {
   message: string | null;
   errorMessage: string | null;
   payload: Record<string, unknown>;
+  /** Identifier of the BullMQ entry currently backing this job, if any. */
+  queueJobId: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;

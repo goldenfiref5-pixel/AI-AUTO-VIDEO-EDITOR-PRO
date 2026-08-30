@@ -3,10 +3,14 @@ import type { JobType } from '@aiedit/shared';
 import { logger } from '../config/logger';
 import { createQueueConnection } from '../lib/redis';
 
+// BullMQ rejects ':' in a queue name — it is the separator in the Redis keys it
+// builds — so namespacing goes through the `prefix` option instead.
+export const QUEUE_PREFIX = 'aiedit';
+
 export const QUEUE_NAMES = {
-  analysis: 'aiedit:analysis',
-  generation: 'aiedit:generation',
-  render: 'aiedit:render',
+  analysis: 'analysis',
+  generation: 'generation',
+  render: 'render',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -44,6 +48,7 @@ export function getQueue(name: QueueName): Queue<JobPayload> {
   if (!queue) {
     queue = new Queue<JobPayload>(name, {
       connection: connectionFor(`queue-${name}`),
+      prefix: QUEUE_PREFIX,
       defaultJobOptions,
     });
     queues.set(name, queue);
@@ -78,20 +83,28 @@ export async function enqueue(
   options: EnqueueOptions = {},
 ): Promise<string> {
   const queue = getQueue(queueForJobType(payload.type));
+
+  // BullMQ rejects ':' in a custom id, and silently ignores an `add` whose id
+  // already exists — which would make every retry a no-op. A per-attempt
+  // suffix keeps the id unique; the real handle is stored on the job row.
+  const queueJobId = `${payload.jobId}-${Date.now().toString(36)}`;
+
   const job = await queue.add(payload.type, payload, {
     priority: options.priority ?? 10,
     delay: options.delayMs,
     attempts: options.attempts,
-    jobId: `${payload.type}:${payload.jobId}`,
+    jobId: queueJobId,
   });
 
   logger.info({ jobId: payload.jobId, type: payload.type, queueJobId: job.id }, 'Job enqueued');
-  return job.id ?? payload.jobId;
+  return job.id ?? queueJobId;
 }
 
-export async function removeQueueJob(type: JobType, jobId: string): Promise<void> {
+/** Remove a queued entry by the id stored on the job row. */
+export async function removeQueueJob(type: JobType, queueJobId: string | null): Promise<void> {
+  if (!queueJobId) return;
   const queue = getQueue(queueForJobType(type));
-  const job = await queue.getJob(`${type}:${jobId}`);
+  const job = await queue.getJob(queueJobId);
   await job?.remove().catch(() => undefined);
 }
 
@@ -132,7 +145,10 @@ export async function queueDepths(): Promise<QueueDepth[]> {
 }
 
 export function createQueueEvents(name: QueueName): QueueEvents {
-  return new QueueEvents(name, { connection: connectionFor(`events-${name}`) });
+  return new QueueEvents(name, {
+    connection: connectionFor(`events-${name}`),
+    prefix: QUEUE_PREFIX,
+  });
 }
 
 export async function closeQueues(): Promise<void> {

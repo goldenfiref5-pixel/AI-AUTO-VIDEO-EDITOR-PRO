@@ -50,7 +50,7 @@ jobsRouter.post(
     await requestCancel(job.id);
     // Removing it from the queue handles the not-yet-started case; a running
     // job notices the cancel flag at its next checkpoint.
-    await removeQueueJob(job.type, job.id).catch(() => undefined);
+    await removeQueueJob(job.type, job.queueJobId).catch(() => undefined);
 
     res.json({ job: await requireJob(job.id, userId, isAdmin) });
   }),

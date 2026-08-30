@@ -1,7 +1,7 @@
 import type { GenerateRequestInput, Job, JobType, Project, RenderRequestInput } from '@aiedit/shared';
 import { logger } from '../config/logger';
-import { badRequest, conflict } from '../utils/errors';
-import { createJob, attachQueueJob, listProjectJobs } from './jobs';
+import { badRequest, conflict, errorMessage } from '../utils/errors';
+import { attachQueueJob, createJob, listProjectJobs, markJobFinished } from './jobs';
 import { enqueue } from '../queue/queues';
 import { listScenes } from './scenes';
 import { getTranscript } from './transcripts';
@@ -44,11 +44,18 @@ async function startJob(
     payload: options.payload,
   });
 
-  const queueJobId = await enqueue(
-    { jobId: job.id, projectId: project.id, userId: project.userId, type, ...(options.payload ?? {}) },
-    { priority: options.priority },
-  );
-  await attachQueueJob(job.id, queueJobId);
+  try {
+    const queueJobId = await enqueue(
+      { jobId: job.id, projectId: project.id, userId: project.userId, type, ...(options.payload ?? {}) },
+      { priority: options.priority },
+    );
+    await attachQueueJob(job.id, queueJobId);
+  } catch (err) {
+    // The row exists but nothing will ever pick it up, so fail it here rather
+    // than leaving a job stuck in `pending` forever.
+    await markJobFinished(job, 'failed', `Could not queue this job: ${errorMessage(err)}`);
+    throw err;
+  }
 
   return job;
 }

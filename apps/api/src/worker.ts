@@ -20,7 +20,7 @@ import {
   reclaimStaleJobs,
 } from './services/jobs';
 import { setProjectStatus } from './services/projects';
-import { QUEUE_NAMES, type JobPayload, type QueueName } from './queue/queues';
+import { QUEUE_NAMES, QUEUE_PREFIX, type JobPayload, type QueueName } from './queue/queues';
 import { errorMessage } from './utils/errors';
 import { ffmpegAvailable } from './render/ffmpeg';
 import { requeueJob } from './services/pipeline';
@@ -134,6 +134,7 @@ async function main(): Promise<void> {
   for (const name of Object.values(QUEUE_NAMES)) {
     const worker = new Worker<JobPayload>(name, processJob, {
       connection: createQueueConnection(`worker-${name}`),
+      prefix: QUEUE_PREFIX,
       concurrency: concurrencyFor(name),
       // Long renders must not be reclaimed as stalled while they are working.
       lockDuration: 10 * 60_000,

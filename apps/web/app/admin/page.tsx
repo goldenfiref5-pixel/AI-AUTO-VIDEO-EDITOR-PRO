@@ -168,7 +168,7 @@ function Admin() {
               <ul className="divide-y divide-line">
                 {queues.map((queue) => (
                   <li key={queue.name} className="flex items-center justify-between px-4 py-2.5 text-xs">
-                    <span className="capitalize text-ink">{queue.name.replace('aiedit:', '')}</span>
+                    <span className="capitalize text-ink">{queue.name}</span>
                     <span className="flex gap-3 text-ink-muted">
                       <span>{queue.active} active</span>
                       <span>{queue.waiting} waiting</span>

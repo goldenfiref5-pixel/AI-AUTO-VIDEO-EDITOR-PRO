@@ -107,7 +107,10 @@ export interface JobProgressUpdate {
 }
 
 export async function updateJobProgress(job: Job, update: JobProgressUpdate): Promise<void> {
-  await query(
+  // The caller usually holds a snapshot taken before the job started, so the
+  // authoritative status and progress come back from the UPDATE rather than
+  // from that stale object.
+  const row = await queryOne<{ status: JobStatus; progress: string; message: string | null }>(
     `UPDATE jobs SET
        status = COALESCE($2, status),
        progress = COALESCE($3, progress),
@@ -115,7 +118,8 @@ export async function updateJobProgress(job: Job, update: JobProgressUpdate): Pr
        total = COALESCE($5, total),
        completed = COALESCE($6, completed),
        failed = COALESCE($7, failed)
-     WHERE id = $1`,
+     WHERE id = $1
+     RETURNING status, progress::text, message`,
     [
       job.id,
       update.status ?? null,
@@ -131,9 +135,9 @@ export async function updateJobProgress(job: Job, update: JobProgressUpdate): Pr
     projectId: job.projectId,
     jobId: job.id,
     type: job.type,
-    status: update.status ?? job.status,
-    progress: update.progress ?? job.progress,
-    message: update.message ?? job.message ?? '',
+    status: row?.status ?? update.status ?? job.status,
+    progress: row ? Number(row.progress) : (update.progress ?? job.progress),
+    message: row?.message ?? update.message ?? '',
   });
 }
 
@@ -197,14 +201,23 @@ export async function assertNotCancelled(jobId: string): Promise<void> {
 }
 
 /**
- * Jobs left in a running state by a crashed worker. Called at worker boot so a
+ * Jobs that will never make progress on their own. Called at worker boot so a
  * restart recovers rather than stranding the project.
+ *
+ * Two cases: a job left mid-flight by a crashed worker, and a job whose row was
+ * written but whose enqueue never landed (a Redis blip between the two writes),
+ * which is recognisable by a missing `queue_job_id`.
  */
 export async function reclaimStaleJobs(olderThanMinutes = 30): Promise<Job[]> {
   const rows = await query(
     `UPDATE jobs SET status = 'pending', message = 'Recovered after a worker restart'
-      WHERE status IN ('processing','generating_images','generating_video','rendering')
-        AND updated_at < now() - ($1 || ' minutes')::interval
+      WHERE (
+              (status IN ('processing','generating_images','generating_video','rendering')
+                AND updated_at < now() - ($1 || ' minutes')::interval)
+              OR
+              (status = 'pending' AND queue_job_id IS NULL
+                AND created_at < now() - INTERVAL '2 minutes')
+            )
       RETURNING ${COLUMNS}`,
     [olderThanMinutes],
   );

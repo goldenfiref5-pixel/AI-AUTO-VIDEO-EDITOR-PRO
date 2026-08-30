@@ -116,7 +116,7 @@ function Jobs() {
               <div key={queue.name} className="card p-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-medium capitalize text-ink">
-                    {queue.name.replace('aiedit:', '')}
+                    {queue.name}
                   </p>
                   {queue.paused ? <span className="text-[10px] text-warn">Paused</span> : null}
                 </div>

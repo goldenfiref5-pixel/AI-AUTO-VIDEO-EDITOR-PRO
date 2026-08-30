@@ -237,6 +237,7 @@ export function mapJob(row: Row): Job {
     message: strOrNull(row['message']),
     errorMessage: strOrNull(row['error_message']),
     payload: json<Record<string, unknown>>(row['payload'], {}),
+    queueJobId: strOrNull(row['queue_job_id']),
     startedAt: isoOrNull(row['started_at']),
     finishedAt: isoOrNull(row['finished_at']),
     createdAt: iso(row['created_at']),
