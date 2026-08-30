@@ -82,6 +82,19 @@ else
   ok "Using your existing .env"
 fi
 
+# --- Ports -----------------------------------------------------------------
+# .env is the source of truth; fall back to the compose defaults.
+read_env() {
+  [ -f .env ] || return 0
+  sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" .env | tail -1 | tr -d '\r"'"'"''
+}
+
+WEB_PORT="$(read_env WEB_PORT)"; WEB_PORT="${WEB_PORT:-3000}"
+API_PORT="$(read_env API_PORT)"; API_PORT="${API_PORT:-4000}"
+
+WEB_URL="http://localhost:${WEB_PORT}"
+API_URL="http://localhost:${API_PORT}"
+
 # --- 3. Build and start ----------------------------------------------------
 say ""
 say "  ${DIM}Building and starting containers.${RESET}"
@@ -96,8 +109,8 @@ say ""
 printf '  Waiting for the platform to come up'
 READY=0
 for _ in $(seq 1 150); do
-  if curl -fsS -m 2 http://localhost:4000/ready >/dev/null 2>&1 \
-     && curl -fsS -m 2 -o /dev/null http://localhost:3000 2>/dev/null; then
+  if curl -fsS -m 2 "${API_URL}/ready" >/dev/null 2>&1 \
+     && curl -fsS -m 2 -o /dev/null "${WEB_URL}" 2>/dev/null; then
     READY=1
     break
   fi
@@ -115,12 +128,12 @@ if [ "$READY" -ne 1 ]; then
   exit 1
 fi
 
-ok "API   http://localhost:4000"
-ok "App   http://localhost:3000"
+ok "API   ${API_URL}"
+ok "App   ${WEB_URL}"
 
 # --- 5. Open a browser -----------------------------------------------------
-if command -v open >/dev/null 2>&1; then open http://localhost:3000 >/dev/null 2>&1 || true
-elif command -v xdg-open >/dev/null 2>&1; then xdg-open http://localhost:3000 >/dev/null 2>&1 || true
+if command -v open >/dev/null 2>&1; then open "${WEB_URL}" >/dev/null 2>&1 || true
+elif command -v xdg-open >/dev/null 2>&1; then xdg-open "${WEB_URL}" >/dev/null 2>&1 || true
 fi
 
 say ""

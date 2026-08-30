@@ -37,6 +37,21 @@ goto build
 :have_env
 echo   [ok] Using your existing .env
 
+REM --- Ports ------------------------------------------------------------------
+REM .env is the source of truth; fall back to the compose defaults so the
+REM readiness check and the browser open follow a custom WEB_PORT / API_PORT.
+set "WEB_PORT=3000"
+set "API_PORT=4000"
+if exist ".env" (
+  for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
+    if /i "%%A"=="WEB_PORT" set "WEB_PORT=%%B"
+    if /i "%%A"=="API_PORT" set "API_PORT=%%B"
+  )
+)
+REM Strip any surrounding quotes a hand-edited .env may carry.
+set "WEB_PORT=%WEB_PORT:"=%"
+set "API_PORT=%API_PORT:"=%"
+
 REM --- 4. Build and start ----------------------------------------------------
 :build
 echo.
@@ -51,15 +66,15 @@ if errorlevel 1 goto compose_failed
 REM --- 5. Wait until it actually answers -------------------------------------
 echo.
 echo   Waiting for the platform to come up...
-powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\wait-ready.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\wait-ready.ps1" -WebPort %WEB_PORT% -ApiPort %API_PORT%
 if errorlevel 1 goto not_ready
 
 echo.
-echo   [ok] API   http://localhost:4000
-echo   [ok] App   http://localhost:3000
+echo   [ok] API   http://localhost:%API_PORT%
+echo   [ok] App   http://localhost:%WEB_PORT%
 echo.
 
-start "" http://localhost:3000
+start "" http://localhost:%WEB_PORT%
 
 echo   Next steps
 echo     1. Create an account - the first one becomes the administrator.

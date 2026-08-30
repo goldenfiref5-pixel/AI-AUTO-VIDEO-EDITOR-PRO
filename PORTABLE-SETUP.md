@@ -98,7 +98,8 @@ docker compose logs worker --tail=80   # just the pipeline
 ```
 
 **"Port is already allocated"** — something else is using 3000, 4000, 5432 or
-6379. Stop it, or edit the `ports:` lines in `docker-compose.yml`.
+6379. Either stop it, or move this stack: see
+[Running on different ports](#running-on-different-ports) below.
 
 **"Docker Desktop is not running"** — launch it and wait for the tray icon to
 settle before retrying.
@@ -117,13 +118,41 @@ docker compose down -v
 
 ## What is running
 
-| Service | Port | Purpose |
+| Service | Default port | Purpose |
 | --- | --- | --- |
 | Web app | 3000 | The interface you use |
 | API | 4000 | REST API and live progress streams |
 | PostgreSQL | 5432 | Projects, transcripts, scenes, jobs |
 | Redis | 6379 | Job queues and progress fan-out |
 | Worker | — | Transcription, generation and rendering |
+
+### Running on different ports
+
+To run this beside another tool that already owns those ports, set these in
+`.env` — only the host side moves, so the containers keep talking to each other
+exactly as before:
+
+```bash
+WEB_PORT=3100
+API_PORT=4100
+POSTGRES_PORT=5433
+REDIS_PORT=6380
+
+# These three must match, or sign-in and uploads fail on CORS.
+API_PUBLIC_URL=http://localhost:4100
+WEB_PUBLIC_URL=http://localhost:3100
+CORS_ORIGINS=http://localhost:3100
+```
+
+Then start it as usual. The launchers read these values, so they wait on the
+right ports and open the right URL.
+
+One caveat: the browser bundle has the API URL compiled into it, so after
+changing `API_PORT` rebuild rather than just restarting:
+
+```bash
+docker compose up -d --build web
+```
 
 Everything stays on your machine. The only outbound calls are to Google's Gemini
 API, using the key you supply.
