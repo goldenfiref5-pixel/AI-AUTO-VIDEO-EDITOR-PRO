@@ -378,3 +378,10 @@ export interface ProgressEvent {
   message: string;
   at: string;
 }
+
+/** Recursively optional — used for settings patches sent from the client. */
+export type DeepPartial<T> = T extends (infer U)[]
+  ? U[]
+  : T extends object
+    ? { [K in keyof T]?: DeepPartial<T[K]> }
+    : T;
