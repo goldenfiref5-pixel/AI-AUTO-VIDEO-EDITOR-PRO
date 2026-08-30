@@ -1,0 +1,24 @@
+# Normalise line endings so a checkout works on every platform.
+* text=auto
+
+# cmd.exe mis-parses batch files that use Unix line endings — goto labels and
+# multi-line blocks silently misbehave — so these must always be CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Shell scripts must stay LF or the shebang line breaks.
+*.sh text eol=lf
+
+# Never rewrite bytes inside binaries or media.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.mp4 binary
+*.mov binary
+*.webm binary
+*.mp3 binary
+*.wav binary
+*.flac binary
+*.bundle binary
