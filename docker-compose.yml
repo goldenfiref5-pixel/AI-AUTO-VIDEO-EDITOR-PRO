@@ -1,0 +1,135 @@
+# Local, single-machine deployment of the whole platform.
+#
+#   cp .env.example .env      # fill in ENCRYPTION_KEY and JWT_SECRET
+#   docker compose up --build
+#
+# API keys are added through the UI at http://localhost:3000/api-keys.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: aiedit
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d aiedit']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - '5432:5432'
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # AOF keeps queued jobs across a restart, which matters for long renders.
+    command: redis-server --appendonly yes --maxmemory-policy noeviction
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    ports:
+      - '6379:6379'
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/aiedit
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (openssl rand -hex 32)}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:4000}
+      WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      STORAGE_LOCAL_DIR: /app/storage
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      RENDER_TMP_DIR: /app/tmp/renders
+      UPLOAD_TMP_DIR: /app/tmp/uploads
+      GEMINI_FALLBACK_API_KEY: ${GEMINI_FALLBACK_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - media-storage:/app/storage
+      - render-tmp:/app/tmp
+    ports:
+      - '4000:4000'
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    restart: unless-stopped
+    # Workers share the API image and environment; only the entrypoint differs.
+    command: ['node', 'apps/api/dist/worker.js']
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/aiedit
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:4000}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      STORAGE_LOCAL_DIR: /app/storage
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      RENDER_TMP_DIR: /app/tmp/renders
+      UPLOAD_TMP_DIR: /app/tmp/uploads
+      RENDER_CONCURRENCY: ${RENDER_CONCURRENCY:-2}
+      GENERATION_CONCURRENCY: ${GENERATION_CONCURRENCY:-4}
+      GEMINI_FALLBACK_API_KEY: ${GEMINI_FALLBACK_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - media-storage:/app/storage
+      - render-tmp:/app/tmp
+    deploy:
+      replicas: ${WORKER_REPLICAS:-1}
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: ${API_PUBLIC_URL:-http://localhost:4000}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - '3000:3000'
+
+volumes:
+  postgres-data:
+  redis-data:
+  media-storage:
+  render-tmp:

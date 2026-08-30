@@ -17,7 +17,13 @@ import {
   markJobFinished,
   updateJobProgress,
 } from '../services/jobs';
-import { requireProject, setProjectProgress, setProjectStatus, setQualityReport } from '../services/projects';
+import {
+  requireProject,
+  setProjectProgress,
+  setProjectStatus,
+  setQualityReport,
+  updateProject,
+} from '../services/projects';
 import { scoreProject } from '../services/quality';
 import { listScenes, replaceScenes, updateScene, type SceneDraft } from '../services/scenes';
 import {
@@ -243,7 +249,6 @@ export async function runStoryAnalysis(job: Job): Promise<void> {
 
   // Adopt the suggested title only when the user has not set one.
   if (!project.videoTitle && plan.title) {
-    const { updateProject } = await import('../services/projects');
     await updateProject(project, { videoTitle: plan.title });
   }
 

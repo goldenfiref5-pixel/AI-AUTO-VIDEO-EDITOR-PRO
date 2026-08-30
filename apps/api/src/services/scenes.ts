@@ -167,7 +167,7 @@ export async function splitScene(scene: Scene, atSec: number): Promise<Scene[]> 
   const first = scene.words.filter((w) => w.end <= atSec);
   const second = scene.words.filter((w) => w.end > atSec);
 
-  return withTransaction(async (client) => {
+  await withTransaction(async (client) => {
     // Make room for the new scene by shifting every later index up by one.
     await client.query(
       `UPDATE scenes SET scene_index = scene_index + 1
@@ -187,12 +187,11 @@ export async function splitScene(scene: Scene, atSec: number): Promise<Scene[]> 
       ],
     );
 
-    const { rows } = await client.query(
+    await client.query(
       `INSERT INTO scenes (project_id, scene_index, start_sec, end_sec, narration, visual_prompt,
                            negative_prompt, emotion, location, character_ids, camera_motion,
                            motion_prompt, transition_in, is_broll, broll_subject, words)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16::jsonb)
-       RETURNING ${COLUMNS}`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16::jsonb)`,
       [
         scene.projectId,
         scene.index + 1,
@@ -212,9 +211,9 @@ export async function splitScene(scene: Scene, atSec: number): Promise<Scene[]> 
         JSON.stringify(second),
       ],
     );
+  });
 
-    return [mapScene(rows[0]!)];
-  }).then(() => listScenes(scene.projectId));
+  return listScenes(scene.projectId);
 }
 
 /** Merge a scene into the one before it. */
@@ -258,18 +257,21 @@ export async function deleteScene(scene: Scene): Promise<Scene[]> {
         WHERE project_id = $1 AND scene_index > $2`,
       [scene.projectId, scene.index],
     );
-    // The deleted scene's screen time is absorbed by its neighbour so the
-    // timeline stays contiguous with the narration.
-    await client.query(
-      `UPDATE scenes SET end_sec = $2
-        WHERE project_id = $1 AND scene_index = $3`,
-      [scene.projectId, scene.endSec, scene.index - 1],
-    );
-    await client.query(
-      `UPDATE scenes SET start_sec = $2
-        WHERE project_id = $1 AND scene_index = $3 AND $3 = 0`,
-      [scene.projectId, scene.startSec, scene.index],
-    );
+    // The deleted scene's screen time is absorbed by a neighbour so the
+    // timeline stays contiguous with the narration: the previous scene extends
+    // over it, or — when the first scene was deleted — the new first scene
+    // starts where it did.
+    if (scene.index > 0) {
+      await client.query(
+        `UPDATE scenes SET end_sec = $2 WHERE project_id = $1 AND scene_index = $3`,
+        [scene.projectId, scene.endSec, scene.index - 1],
+      );
+    } else {
+      await client.query(
+        `UPDATE scenes SET start_sec = $2 WHERE project_id = $1 AND scene_index = 0`,
+        [scene.projectId, scene.startSec],
+      );
+    }
   });
 
   return listScenes(scene.projectId);

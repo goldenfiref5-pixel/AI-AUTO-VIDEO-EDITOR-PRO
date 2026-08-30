@@ -21,3 +21,6 @@ yarn-error.log*
 .DS_Store
 .idea/
 .vscode/
+
+# Next.js generated
+next-env.d.ts
