@@ -133,6 +133,11 @@ ffmpeg -filters | grep -E 'xfade|zoompan|subtitles'
 
 ## Quick start (Docker)
 
+> **Just want to try it on your own machine?** Read
+> [`PORTABLE-SETUP.md`](PORTABLE-SETUP.md) instead — double-click
+> `START-WINDOWS.bat` (Windows) or run `./start.sh` (macOS/Linux) and it
+> configures itself.
+
 ```bash
 cp .env.example .env
 

@@ -32,7 +32,9 @@ COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/package.json package.json
 COPY --from=build /app/packages/shared/dist packages/shared/dist
 COPY --from=build /app/packages/shared/package.json packages/shared/package.json
-COPY --from=build /app/apps/web/.next apps/web/.next
+# next start writes into .next/cache at runtime, so the unprivileged user has
+# to own it.
+COPY --from=build --chown=node:node /app/apps/web/.next apps/web/.next
 COPY --from=build /app/apps/web/public apps/web/public
 COPY --from=build /app/apps/web/package.json apps/web/package.json
 COPY --from=build /app/apps/web/next.config.mjs apps/web/next.config.mjs
