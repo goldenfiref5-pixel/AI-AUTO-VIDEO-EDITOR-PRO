@@ -15,7 +15,7 @@ import {
   updateProjectSchema,
   updateTranscriptSchema,
 } from '@aiedit/shared';
-import { authContext, requireAuth } from '../middleware/auth';
+import { allowQueryToken, authContext, requireAuth } from '../middleware/auth';
 import { asyncHandler } from '../middleware/errorHandler';
 import { uploadAudio, uploadImages, uploadVideo } from '../middleware/upload';
 import { badRequest, notFound } from '../utils/errors';
@@ -65,6 +65,13 @@ import { lastProgress, subscribeToProject } from '../services/progress';
 import { fetchRemoteVideo } from '../services/remoteVideo';
 
 export const projectsRouter = Router();
+
+// Must run before `requireAuth`: the SSE stream authenticates from the query
+// string because EventSource cannot send an Authorization header.
+projectsRouter.use((req, _res, next) => {
+  if (req.path.endsWith('/progress')) allowQueryToken(req, _res, next);
+  else next();
+});
 
 projectsRouter.use(requireAuth);
 

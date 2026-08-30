@@ -60,7 +60,10 @@ export function createApp(): Express {
     pinoHttp({
       logger,
       autoLogging: {
-        ignore: (req) => req.url === '/health' || req.url === '/ready',
+        // The progress stream carries its token in the query string, so its
+        // URL must never reach the logs.
+        ignore: (req) =>
+          req.url === '/health' || req.url === '/ready' || (req.url ?? '').includes('/progress'),
       },
     }),
   );

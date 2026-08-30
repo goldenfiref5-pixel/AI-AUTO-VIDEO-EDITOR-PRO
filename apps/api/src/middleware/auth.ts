@@ -9,6 +9,7 @@ declare global {
   namespace Express {
     interface Request {
       auth?: { userId: string; email: string; role: UserRole };
+      allowQueryToken?: boolean;
     }
   }
 }
@@ -16,8 +17,28 @@ declare global {
 function extractToken(req: Request): string | null {
   const header = req.headers.authorization;
   if (header?.startsWith('Bearer ')) return header.slice(7).trim();
+
   const cookie = req.cookies?.['access_token'];
-  return typeof cookie === 'string' && cookie ? cookie : null;
+  if (typeof cookie === 'string' && cookie) return cookie;
+
+  // EventSource cannot set request headers, so the SSE route — and only that
+  // route, via `allowQueryToken` — accepts the token as a query parameter.
+  if (req.allowQueryToken) {
+    const queryToken = req.query['access_token'];
+    if (typeof queryToken === 'string' && queryToken) return queryToken;
+  }
+
+  return null;
+}
+
+/**
+ * Opt one route into query-parameter authentication. Kept deliberately narrow:
+ * tokens in URLs end up in access logs and browser history, so this is only
+ * acceptable where the browser gives us no alternative.
+ */
+export function allowQueryToken(req: Request, _res: Response, next: NextFunction): void {
+  req.allowQueryToken = true;
+  next();
 }
 
 export function requireAuth(req: Request, _res: Response, next: NextFunction): void {
