@@ -152,6 +152,29 @@ Then open <http://localhost:3000>. The first account you create becomes the
 administrator. Add a Gemini API key under **API management** before creating a
 project.
 
+### Running on different ports
+
+If something already uses 3000/4000/5432/6379, set these in `.env` — only the
+host side moves, containers keep talking to each other on the standard ports:
+
+```bash
+WEB_PORT=3100
+API_PORT=4100
+POSTGRES_PORT=5433
+REDIS_PORT=6380
+
+# These must match, or sign-in and uploads fail on CORS.
+API_PUBLIC_URL=http://localhost:4100
+WEB_PUBLIC_URL=http://localhost:3100
+CORS_ORIGINS=http://localhost:3100
+```
+
+Then `docker compose up --build`, and open <http://localhost:3100>.
+
+`NEXT_PUBLIC_API_URL` is baked into the browser bundle at build time, so after
+changing the API port rebuild the web image rather than just restarting it:
+`docker compose up --build web`.
+
 ## Quick start (local)
 
 ```bash
@@ -167,6 +190,10 @@ npm run dev               # API :4000, worker, web :3000
 ```
 
 `npm run dev` runs the API, a worker and the web app together.
+
+To use different ports locally, set `PORT` (API) and `WEB_PORT` (web) in `.env`
+alongside `DATABASE_URL`, `REDIS_URL`, `API_PUBLIC_URL`, `WEB_PUBLIC_URL`,
+`CORS_ORIGINS` and `NEXT_PUBLIC_API_URL`.
 
 ---
 

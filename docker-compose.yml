@@ -3,7 +3,13 @@
 #   cp .env.example .env      # fill in ENCRYPTION_KEY and JWT_SECRET
 #   docker compose up --build
 #
-# API keys are added through the UI at http://localhost:3000/api-keys.
+# API keys are added through the UI at <WEB_PUBLIC_URL>/api-keys.
+#
+# Every published port is configurable, so this stack can run beside anything
+# already using the defaults. Set WEB_PORT / API_PORT / POSTGRES_PORT /
+# REDIS_PORT in .env, and keep API_PUBLIC_URL, WEB_PUBLIC_URL and CORS_ORIGINS
+# pointing at the ports you chose. Only the host side moves — containers keep
+# talking to each other on the standard ports over the compose network.
 
 services:
   postgres:
@@ -21,7 +27,7 @@ services:
       timeout: 5s
       retries: 5
     ports:
-      - '5432:5432'
+      - '${POSTGRES_PORT:-5432}:5432'
 
   redis:
     image: redis:7-alpine
@@ -36,7 +42,7 @@ services:
       timeout: 3s
       retries: 5
     ports:
-      - '6379:6379'
+      - '${REDIS_PORT:-6379}:6379'
 
   api:
     build:
@@ -74,7 +80,7 @@ services:
       - media-storage:/app/storage
       - render-tmp:/app/tmp
     ports:
-      - '4000:4000'
+      - '${API_PORT:-4000}:4000'
 
   worker:
     build:
@@ -126,7 +132,7 @@ services:
     depends_on:
       - api
     ports:
-      - '3000:3000'
+      - '${WEB_PORT:-3000}:3000'
 
 volumes:
   postgres-data:
