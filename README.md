@@ -182,6 +182,17 @@ Then open <http://localhost:3000>. The first account you create becomes the
 administrator. Add a Gemini API key under **API management** before creating a
 project.
 
+### Something not reachable?
+
+```bash
+./doctor.sh                 # macOS and Linux
+DOCTOR-WINDOWS.bat          # Windows
+```
+
+It checks whether the checkout is current, whether `.env` is being read, what
+the containers actually published, and whether the app answers — then prints the
+one command that fixes what it found.
+
 ### Running on different ports
 
 If something already uses 3000/4000/5432/6379, set these in `.env` — only the

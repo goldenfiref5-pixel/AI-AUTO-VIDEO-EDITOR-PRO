@@ -104,6 +104,15 @@ docker compose logs worker --tail=80   # just the pipeline
 **"Docker Desktop is not running"** — launch it and wait for the tray icon to
 settle before retrying.
 
+**Site can't be reached / connection refused** — run the doctor. It checks every
+common cause and prints the exact command to fix it:
+
+```bash
+./doctor.sh            # macOS and Linux
+```
+
+On Windows, double-click **DOCTOR-WINDOWS.bat**.
+
 **A job failed** — open the **Job queue** page. Each failure shows its reason,
 and most have a **Retry** button. The usual cause is an exhausted API key, which
 **API management** will show as `quota_exceeded` or `rate_limited`.
