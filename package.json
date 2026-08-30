@@ -1,0 +1,31 @@
+{
+  "name": "ai-auto-editor-pro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Auto Editor Pro - automated AI video production platform driven by a user's voiceover.",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "scripts": {
+    "build": "npm run build --workspace @aiedit/shared && npm run build --workspace @aiedit/api && npm run build --workspace @aiedit/web",
+    "build:shared": "npm run build --workspace @aiedit/shared",
+    "dev": "concurrently -n api,worker,web -c blue,magenta,green \"npm:dev:api\" \"npm:dev:worker\" \"npm:dev:web\"",
+    "dev:api": "npm run dev --workspace @aiedit/api",
+    "dev:worker": "npm run dev:worker --workspace @aiedit/api",
+    "dev:web": "npm run dev --workspace @aiedit/web",
+    "migrate": "npm run migrate --workspace @aiedit/api",
+    "seed": "npm run seed --workspace @aiedit/api",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}
