@@ -131,6 +131,36 @@ ffmpeg -filters | grep -E 'xfade|zoompan|subtitles'
 
 ---
 
+## Quick start (GitHub Codespaces)
+
+Runs entirely in the browser — nothing to install, no port conflicts with
+anything on your own machine.
+
+1. On the repository page: **Code ▸ Codespaces ▸ Create codespace on
+   `claude/ai-auto-video-editor-sgr2ff`**
+2. Wait for it to build, then run:
+
+   ```bash
+   docker compose up --build
+   ```
+
+3. Open the **Ports** tab, set port **4000** to **Public**
+   (right-click ▸ Port Visibility ▸ Public), then click the globe next to port
+   **3000**.
+
+The dev container writes the Codespace's own URLs into `.env` for you, so the
+app is reachable at `https://<codespace>-3000.app.github.dev` rather than
+localhost.
+
+Port 4000 has to be public because the browser calls the API directly from the
+web app's origin; a private forwarded port answers with a GitHub auth redirect
+instead of JSON.
+
+Two caveats worth knowing: Codespaces bills against your monthly free hours
+(the default 2-core machine works but renders slowly — 4 cores is much better),
+and a Codespace is a development environment, not somewhere to host this for
+real users.
+
 ## Quick start (Docker)
 
 > **Just want to try it on your own machine?** Read

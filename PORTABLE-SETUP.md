@@ -116,6 +116,14 @@ docker compose down -v
 
 ---
 
+## Prefer not to install anything?
+
+Run it in **GitHub Codespaces** instead — it works entirely in the browser and
+cannot collide with anything on your machine. See *Quick start (GitHub
+Codespaces)* in `README.md`.
+
+---
+
 ## What is running
 
 | Service | Default port | Purpose |

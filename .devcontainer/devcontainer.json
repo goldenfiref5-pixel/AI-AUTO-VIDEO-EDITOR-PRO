@@ -1,0 +1,54 @@
+{
+  "name": "AI Auto Editor Pro",
+
+  // A plain Debian base plus Docker: the platform itself runs as containers
+  // (Postgres, Redis, API, worker, web), so the dev container only needs to be
+  // able to drive Docker Compose.
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+  },
+
+  // Rendering is CPU-bound and the first build compiles two apps. The 2-core
+  // default works but is slow; ask for 4 cores where the account allows it.
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+
+  "forwardPorts": [3000, 4000],
+
+  "portsAttributes": {
+    "3000": {
+      "label": "AI Auto Editor — web app",
+      "onAutoForward": "notify",
+      "visibility": "public"
+    },
+    "4000": {
+      "label": "AI Auto Editor — API",
+      "onAutoForward": "silent",
+      // The browser calls this directly from the web app's origin, so it has to
+      // be reachable without a Codespaces auth redirect.
+      "visibility": "public"
+    }
+  },
+
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "waitFor": "postCreateCommand",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  },
+
+  "remoteUser": "vscode"
+}
