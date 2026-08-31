@@ -439,16 +439,38 @@ function Get-EnvValue([string]$Key, [string]$Default) {
     return $value
 }
 
+<#
+    Run "docker compose ..." with its output going straight to this console.
+
+    Calling it through PowerShell's pipeline ($LASTEXITCODE style) routes the
+    output through the pipeline, where Docker's progress writer - which expects
+    a terminal - can end up producing nothing at all. Start-Process with
+    -NoNewWindow hands Docker the real console, so its progress appears live,
+    exactly as it would in a Command Prompt.
+#>
 function Invoke-Compose {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
     $docker = Get-DockerExe
     if (-not $docker) { throw 'docker.exe was not found.' }
 
+    $proc = Start-Process -FilePath $docker `
+                          -ArgumentList (@('compose') + $Arguments) `
+                          -WorkingDirectory $InstallRoot `
+                          -NoNewWindow -Wait -PassThru
+    return $proc.ExitCode
+}
+
+<# Same, but capture the output instead of showing it (used by diagnostics). #>
+function Invoke-ComposeCapture {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    $docker = Get-DockerExe
+    if (-not $docker) { return @() }
+
     Push-Location $InstallRoot
     try {
-        & $docker compose @Arguments
-        return $LASTEXITCODE
+        return (& $docker compose @Arguments 2>&1)
     } finally {
         Pop-Location
     }
@@ -551,15 +573,29 @@ function Invoke-Start {
     Write-Warn 'Do not click in this window. A click pauses it (title shows "Select"; press Escape).'
     Write-Host ''
 
-    $code = Invoke-Compose @('up', '-d', '--build')
+    # Build first, with plain progress: the fancy renderer prints nothing
+    # outside a real terminal, which looks exactly like a hang.
+    Write-Host '  --- docker build ------------------------------------------' -ForegroundColor DarkGray
+    $code = Invoke-Compose @('build', '--progress', 'plain')
+    Write-Host '  -----------------------------------------------------------' -ForegroundColor DarkGray
+
     if ($code -ne 0) {
-        Write-Bad "Startup failed with exit code $code."
+        Write-Bad "The build failed with exit code $code."
         Write-Host ''
         Write-Host '  The output above says why. Common causes:' -ForegroundColor Gray
-        Write-Host '    - no internet connection while downloading base images' -ForegroundColor Gray
+        Write-Host '    - no internet connection while downloading packages' -ForegroundColor Gray
         Write-Host '    - not enough disk space (this needs about 6 GB free)' -ForegroundColor Gray
         return 1
     }
+    Write-Ok 'Images built'
+
+    Write-Info 'Starting the containers...'
+    $code = Invoke-Compose @('up', '-d')
+    if ($code -ne 0) {
+        Write-Bad "Startup failed with exit code $code."
+        return 1
+    }
+    Write-Ok 'Containers started'
 
     if (-not (Wait-ForApp -WebPort $webPort -ApiPort $apiPort)) {
         Write-Bad 'The containers started but the app never answered.'
@@ -637,7 +673,7 @@ function Invoke-Doctor {
 
     Write-Host ''
     Write-Host '  Containers' -ForegroundColor White
-    $null = Invoke-Compose @('ps')
+    Invoke-ComposeCapture @('ps') | ForEach-Object { Write-Host "    $_" }
     Write-Host ''
 
     $answered = $false
