@@ -7,6 +7,13 @@ const bool = (fallback: boolean) =>
     .optional()
     .transform((v) => (v === undefined || v === '' ? fallback : ['1', 'true', 'yes', 'on'].includes(v.toLowerCase())));
 
+/** Treats an empty string as absent, so a blank passthrough uses the default. */
+const model = (fallback: string) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v.trim() === '' ? fallback : v.trim()));
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
@@ -47,11 +54,14 @@ const envSchema = z.object({
   ANALYSIS_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
 
   GEMINI_API_BASE: z.string().url().default('https://generativelanguage.googleapis.com'),
-  GEMINI_TEXT_MODEL: z.string().default('gemini-2.5-flash'),
-  GEMINI_REASONING_MODEL: z.string().default('gemini-2.5-pro'),
-  GEMINI_IMAGE_MODEL: z.string().default('gemini-2.5-flash-image'),
-  GEMINI_VIDEO_MODEL: z.string().default('veo-3.1-generate-preview'),
-  GEMINI_TRANSCRIBE_MODEL: z.string().default('gemini-2.5-flash'),
+  // Google retires model ids, and a newly created key is often not offered an
+  // older one at all. `model()` treats an empty value as unset so a blank
+  // passthrough in docker-compose falls back to the default here.
+  GEMINI_TEXT_MODEL: model('gemini-3.6-flash'),
+  GEMINI_REASONING_MODEL: model('gemini-3.6-pro'),
+  GEMINI_IMAGE_MODEL: model('gemini-3.6-flash-image'),
+  GEMINI_VIDEO_MODEL: model('veo-3.1-generate-preview'),
+  GEMINI_TRANSCRIBE_MODEL: model('gemini-3.6-flash'),
   GEMINI_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(1_800_000).default(180_000),
   GEMINI_VIDEO_POLL_INTERVAL_MS: z.coerce.number().int().min(1_000).default(10_000),
   GEMINI_VIDEO_TIMEOUT_MS: z.coerce.number().int().min(30_000).default(900_000),

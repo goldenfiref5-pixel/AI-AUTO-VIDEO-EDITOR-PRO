@@ -75,6 +75,14 @@ services:
       RENDER_TMP_DIR: /app/tmp/renders
       UPLOAD_TMP_DIR: /app/tmp/uploads
       GEMINI_FALLBACK_API_KEY: ${GEMINI_FALLBACK_API_KEY:-}
+      # Model names are overridable at runtime. Google retires model ids from
+      # time to time, and a new key may not be offered an older one at all, so
+      # these must be changeable without rebuilding the image.
+      GEMINI_TEXT_MODEL: ${GEMINI_TEXT_MODEL:-}
+      GEMINI_REASONING_MODEL: ${GEMINI_REASONING_MODEL:-}
+      GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:-}
+      GEMINI_VIDEO_MODEL: ${GEMINI_VIDEO_MODEL:-}
+      GEMINI_TRANSCRIBE_MODEL: ${GEMINI_TRANSCRIBE_MODEL:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - media-storage:/app/storage
@@ -115,6 +123,14 @@ services:
       RENDER_CONCURRENCY: ${RENDER_CONCURRENCY:-2}
       GENERATION_CONCURRENCY: ${GENERATION_CONCURRENCY:-4}
       GEMINI_FALLBACK_API_KEY: ${GEMINI_FALLBACK_API_KEY:-}
+      # Model names are overridable at runtime. Google retires model ids from
+      # time to time, and a new key may not be offered an older one at all, so
+      # these must be changeable without rebuilding the image.
+      GEMINI_TEXT_MODEL: ${GEMINI_TEXT_MODEL:-}
+      GEMINI_REASONING_MODEL: ${GEMINI_REASONING_MODEL:-}
+      GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:-}
+      GEMINI_VIDEO_MODEL: ${GEMINI_VIDEO_MODEL:-}
+      GEMINI_TRANSCRIBE_MODEL: ${GEMINI_TRANSCRIBE_MODEL:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - media-storage:/app/storage
