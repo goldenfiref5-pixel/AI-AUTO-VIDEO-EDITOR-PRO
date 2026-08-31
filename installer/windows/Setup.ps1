@@ -199,6 +199,76 @@ function Start-DockerEngine {
     return $false
 }
 
+# --- WSL ---------------------------------------------------------------------
+
+<#
+    Docker Desktop runs its engine inside WSL 2. A Windows install that still
+    has the old inbox WSL cannot start it, and Docker reports only
+    "WSL needs updating" in its own window - the engine never comes up, so
+    waiting for it is futile. Detect that here instead of timing out.
+#>
+function Test-WslCurrent {
+    $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+    if (-not $wsl) { return $false }
+
+    # "wsl --version" exists only in the modern (Store) WSL. The old inbox
+    # version fails the switch, which is exactly the build Docker rejects.
+    try {
+        $null = & wsl.exe --version 2>&1
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
+}
+
+function Repair-Wsl {
+    Write-Warn 'Windows Subsystem for Linux (WSL) is missing or too old.'
+    Write-Info 'Docker runs its engine inside WSL, so it cannot start until this is fixed.'
+    Write-Info 'Updating WSL now. Windows will ask for permission - click Yes.'
+    Write-Host ''
+
+    try {
+        $proc = Start-Process -FilePath 'wsl.exe' -ArgumentList '--update' `
+                              -Wait -PassThru -Verb RunAs
+        if ($proc.ExitCode -ne 0) {
+            # A machine with no WSL at all needs --install rather than --update.
+            Write-Info 'Update did not apply. Trying a full WSL install...'
+            $proc = Start-Process -FilePath 'wsl.exe' -ArgumentList '--install', '--no-distribution' `
+                                  -Wait -PassThru -Verb RunAs
+        }
+    } catch {
+        Write-Bad "Could not run the WSL updater: $($_.Exception.Message)"
+        return $false
+    }
+
+    if ($proc.ExitCode -ne 0) { return $false }
+
+    Write-Ok 'WSL updated'
+    return $true
+}
+
+function Show-WslInstructions {
+    Write-Host ''
+    Write-Host '  ============================================================' -ForegroundColor Yellow
+    Write-Host '   ACTION NEEDED: update WSL, then RESTART Windows' -ForegroundColor Yellow
+    Write-Host '  ============================================================' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '   1. Press Start, type: powershell' -ForegroundColor White
+    Write-Host '   2. Right-click Windows PowerShell, choose Run as administrator' -ForegroundColor White
+    Write-Host '   3. Run this command:' -ForegroundColor White
+    Write-Host ''
+    Write-Host '        wsl --update' -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host '      If it says WSL is not installed, run this instead:' -ForegroundColor White
+    Write-Host ''
+    Write-Host '        wsl --install' -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host '   4. RESTART Windows. This step is required - the update does' -ForegroundColor White
+    Write-Host '      not take effect until you reboot.' -ForegroundColor White
+    Write-Host '   5. Launch AI Auto Editor Pro again from the Start menu.' -ForegroundColor White
+    Write-Host ''
+}
+
 # --- Settings ---------------------------------------------------------------
 
 function New-EnvFile {
@@ -312,12 +382,33 @@ function Invoke-Start {
     Write-Step 2 4 'Starting the Docker engine'
     if (Test-DockerRunning) {
         Write-Ok 'Docker engine already running'
-    } elseif (-not (Start-DockerEngine)) {
-        Write-Bad 'Docker did not become ready in time.'
-        Write-Host ''
-        Write-Host '  If Docker Desktop was just installed, RESTART Windows and run this again.' -ForegroundColor White
-        Write-Host '  Otherwise open Docker Desktop and wait for the whale icon to stop animating.' -ForegroundColor White
-        return 1
+    } else {
+        # Check WSL first: Docker cannot start without it, and waiting six
+        # minutes for an engine blocked on an old WSL helps nobody.
+        if (-not (Test-WslCurrent)) {
+            if (-not (Repair-Wsl)) {
+                Show-WslInstructions
+                return 1
+            }
+            Write-Host ''
+            Write-Warn 'WSL was updated. Windows must RESTART before Docker can start.'
+            Write-Warn 'Restart now, then launch AI Auto Editor Pro again.'
+            Write-Host ''
+            return 1
+        }
+        Write-Ok 'WSL is up to date'
+
+        if (-not (Start-DockerEngine)) {
+            Write-Bad 'Docker did not become ready in time.'
+            Write-Host ''
+            Write-Host '  Most likely causes:' -ForegroundColor Gray
+            Write-Host '    - Windows has not been restarted since Docker was installed' -ForegroundColor Gray
+            Write-Host '    - Docker Desktop is showing an error of its own - open it and look' -ForegroundColor Gray
+            Write-Host ''
+            Write-Host '  If Docker Desktop says "WSL needs updating":' -ForegroundColor Gray
+            Show-WslInstructions
+            return 1
+        }
     }
 
     Write-Step 3 4 'Preparing settings'
@@ -391,9 +482,18 @@ function Invoke-Doctor {
     }
     Write-Ok "Docker found at $docker"
 
+    if (-not (Test-WslCurrent)) {
+        Write-Bad 'WSL is missing or too old - Docker cannot start without it.'
+        Show-WslInstructions
+        return 1
+    }
+    Write-Ok 'WSL is up to date'
+
     if (-not (Test-DockerRunning)) {
         Write-Bad 'Docker Desktop is installed but the engine is not running.'
         Write-Host '  Fix: open Docker Desktop, wait for the whale to stop animating, then Start again.' -ForegroundColor White
+        Write-Host '  If it reports "WSL needs updating":' -ForegroundColor White
+        Show-WslInstructions
         return 1
     }
     Write-Ok 'Docker engine running'
