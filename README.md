@@ -114,6 +114,12 @@ review. Nothing is written until the user accepts it.
 
 ---
 
+## Removing it again
+
+Docker and its WSL virtual disk take 8-20 GB.  covers how to back
+up your projects, remove everything cleanly, and reclaim the space - or keep
+Docker but stop it reserving memory when idle.
+
 ## Requirements
 
 - Node.js 20.10+ (22 recommended)
