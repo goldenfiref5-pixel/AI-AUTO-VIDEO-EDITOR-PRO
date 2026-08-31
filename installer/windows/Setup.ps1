@@ -207,6 +207,16 @@ function Start-DockerEngine {
     "WSL needs updating" in its own window - the engine never comes up, so
     waiting for it is futile. Detect that here instead of timing out.
 #>
+function Get-WindowsBuild {
+    # CurrentBuildNumber is authoritative; OSVersion lies under app compat
+    # shims on some Windows 10 builds.
+    try {
+        return [int](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').CurrentBuildNumber
+    } catch {
+        return [int][System.Environment]::OSVersion.Version.Build
+    }
+}
+
 function Test-WslCurrent {
     $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
     if (-not $wsl) { return $false }
@@ -221,51 +231,123 @@ function Test-WslCurrent {
     }
 }
 
-function Repair-Wsl {
-    Write-Warn 'Windows Subsystem for Linux (WSL) is missing or too old.'
-    Write-Info 'Docker runs its engine inside WSL, so it cannot start until this is fixed.'
-    Write-Info 'Updating WSL now. Windows will ask for permission - click Yes.'
-    Write-Host ''
-
-    try {
-        $proc = Start-Process -FilePath 'wsl.exe' -ArgumentList '--update' `
-                              -Wait -PassThru -Verb RunAs
-        if ($proc.ExitCode -ne 0) {
-            # A machine with no WSL at all needs --install rather than --update.
-            Write-Info 'Update did not apply. Trying a full WSL install...'
-            $proc = Start-Process -FilePath 'wsl.exe' -ArgumentList '--install', '--no-distribution' `
-                                  -Wait -PassThru -Verb RunAs
+function Test-WindowsFeaturesEnabled {
+    # Windows 10 ships both features disabled by default. Without them WSL 2
+    # cannot run at all, and "wsl --update" will not fix it.
+    foreach ($feature in @('Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform')) {
+        try {
+            $state = (Get-WindowsOptionalFeature -Online -FeatureName $feature -ErrorAction Stop).State
+            if ($state -ne 'Enabled') { return $false }
+        } catch {
+            # Get-WindowsOptionalFeature needs elevation on some builds; treat
+            # an unreadable state as "cannot confirm" rather than "disabled".
+            return $true
         }
+    }
+    return $true
+}
+
+function Enable-WindowsFeatures {
+    Write-Info 'Enabling the Windows features WSL needs. Windows will ask for permission.'
+    $cmd = 'dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart; ' +
+           'dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart'
+    try {
+        $proc = Start-Process -FilePath 'powershell.exe' `
+                              -ArgumentList '-NoProfile', '-Command', $cmd `
+                              -Wait -PassThru -Verb RunAs
+        return ($proc.ExitCode -eq 0)
     } catch {
-        Write-Bad "Could not run the WSL updater: $($_.Exception.Message)"
+        Write-Bad "Could not enable the Windows features: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Repair-Wsl {
+    $build = Get-WindowsBuild
+    Write-Info "Windows build $build"
+
+    if ($build -lt 18362) {
+        Write-Bad 'This build of Windows 10 is too old for WSL 2, which Docker requires.'
+        Write-Host ''
+        Write-Host '   Update Windows first: Settings > Update and Security > Windows Update.' -ForegroundColor White
+        Write-Host '   You need at least version 1903 (build 18362); 22H2 is recommended.' -ForegroundColor White
+        Write-Host ''
         return $false
     }
 
-    if ($proc.ExitCode -ne 0) { return $false }
+    if (-not (Test-WindowsFeaturesEnabled)) {
+        if (-not (Enable-WindowsFeatures)) { return $false }
+        Write-Ok 'Windows features enabled'
+    }
+
+    if ($build -ge 19041) {
+        Write-Info 'Updating WSL. Windows will ask for permission - click Yes.'
+        try {
+            $proc = Start-Process -FilePath 'wsl.exe' -ArgumentList '--update' -Wait -PassThru -Verb RunAs
+            if ($proc.ExitCode -ne 0) {
+                Write-Info 'Update did not apply. Trying a full WSL install...'
+                $proc = Start-Process -FilePath 'wsl.exe' -ArgumentList '--install', '--no-distribution' `
+                                      -Wait -PassThru -Verb RunAs
+            }
+            if ($proc.ExitCode -ne 0) { return $false }
+        } catch {
+            Write-Bad "Could not run the WSL updater: $($_.Exception.Message)"
+            return $false
+        }
+    } else {
+        # Windows 10 builds 18362-19040 have no "wsl --update"; the kernel must
+        # be installed from Microsoft's standalone package.
+        Write-Info 'This Windows build needs the WSL 2 kernel package. Downloading it...'
+        $msi = Join-Path $env:TEMP 'wsl_update_x64.msi'
+        try {
+            Get-FileWithProgress -Url 'https://wslstorestorage.blob.core.windows.net/wslblob/wsl_update_x64.msi' `
+                                 -Destination $msi -Activity 'Downloading WSL 2 kernel'
+            $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i', "\"$msi\"", '/quiet', '/norestart' `
+                                  -Wait -PassThru -Verb RunAs
+            if ($proc.ExitCode -ne 0) { return $false }
+            Remove-Item $msi -Force -ErrorAction SilentlyContinue
+        } catch {
+            Write-Bad "Could not install the WSL 2 kernel: $($_.Exception.Message)"
+            return $false
+        }
+    }
 
     Write-Ok 'WSL updated'
     return $true
 }
 
 function Show-WslInstructions {
+    $build = Get-WindowsBuild
     Write-Host ''
     Write-Host '  ============================================================' -ForegroundColor Yellow
     Write-Host '   ACTION NEEDED: update WSL, then RESTART Windows' -ForegroundColor Yellow
     Write-Host '  ============================================================' -ForegroundColor Yellow
     Write-Host ''
+    Write-Host "   Your Windows build: $build" -ForegroundColor Gray
+    Write-Host ''
     Write-Host '   1. Press Start, type: powershell' -ForegroundColor White
     Write-Host '   2. Right-click Windows PowerShell, choose Run as administrator' -ForegroundColor White
-    Write-Host '   3. Run this command:' -ForegroundColor White
+    Write-Host '   3. Run these commands, one at a time:' -ForegroundColor White
     Write-Host ''
-    Write-Host '        wsl --update' -ForegroundColor Cyan
+    Write-Host '        dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart' -ForegroundColor Cyan
+    Write-Host '        dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart' -ForegroundColor Cyan
+
+    if ($build -ge 19041) {
+        Write-Host '        wsl --update' -ForegroundColor Cyan
+    } else {
+        Write-Host ''
+        Write-Host '      Then download and run the WSL 2 kernel update:' -ForegroundColor White
+        Write-Host '        https://aka.ms/wsl2kernel' -ForegroundColor Cyan
+    }
+
     Write-Host ''
-    Write-Host '      If it says WSL is not installed, run this instead:' -ForegroundColor White
-    Write-Host ''
-    Write-Host '        wsl --install' -ForegroundColor Cyan
-    Write-Host ''
-    Write-Host '   4. RESTART Windows. This step is required - the update does' -ForegroundColor White
-    Write-Host '      not take effect until you reboot.' -ForegroundColor White
+    Write-Host '   4. RESTART Windows. This is required - the changes do not' -ForegroundColor White
+    Write-Host '      take effect until you reboot.' -ForegroundColor White
     Write-Host '   5. Launch AI Auto Editor Pro again from the Start menu.' -ForegroundColor White
+    Write-Host ''
+    Write-Host '   If Docker still refuses after rebooting, virtualization may be' -ForegroundColor Gray
+    Write-Host '   turned off in your BIOS. Open Task Manager > Performance > CPU' -ForegroundColor Gray
+    Write-Host '   and check that Virtualization says Enabled.' -ForegroundColor Gray
     Write-Host ''
 }
 
