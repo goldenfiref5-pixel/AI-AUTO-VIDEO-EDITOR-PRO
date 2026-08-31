@@ -60,8 +60,9 @@ Google's Gemini API that generation itself makes."
 !insertmacro MUI_LANGUAGE "English"
 
 Function LaunchApp
-  ; -ExecutionPolicy Bypass so the shortcut works on a default Windows policy.
-  Exec 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\Setup.ps1" -Action Start -InstallRoot "$INSTDIR"'
+  ; Launch the .cmd wrapper, never powershell.exe directly: the wrapper keeps
+  ; the window open so a failure is visible instead of flashing past.
+  Exec '"$INSTDIR\Start.cmd"'
 FunctionEnd
 
 Section "Install"
@@ -87,24 +88,18 @@ Section "Install"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   CreateDirectory "$SMPROGRAMS\${APP_NAME}"
+  ; Every shortcut targets a .cmd wrapper so the console window persists and
+  ; any error stays on screen to be read.
   CreateShortcut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" \
-    "powershell.exe" \
-    '-NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\Setup.ps1" -Action Start -InstallRoot "$INSTDIR"' \
-    "$SYSDIR\shell32.dll" 137
+    "$INSTDIR\Start.cmd" "" "$SYSDIR\shell32.dll" 137
   CreateShortcut "$SMPROGRAMS\${APP_NAME}\Stop ${APP_NAME}.lnk" \
-    "powershell.exe" \
-    '-NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\Setup.ps1" -Action Stop -InstallRoot "$INSTDIR"' \
-    "$SYSDIR\shell32.dll" 132
+    "$INSTDIR\Stop.cmd" "" "$SYSDIR\shell32.dll" 132
   CreateShortcut "$SMPROGRAMS\${APP_NAME}\Diagnose ${APP_NAME}.lnk" \
-    "powershell.exe" \
-    '-NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\Setup.ps1" -Action Doctor -InstallRoot "$INSTDIR"' \
-    "$SYSDIR\shell32.dll" 23
+    "$INSTDIR\Diagnose.cmd" "" "$SYSDIR\shell32.dll" 23
   CreateShortcut "$SMPROGRAMS\${APP_NAME}\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
 
   CreateShortcut "$DESKTOP\${APP_NAME}.lnk" \
-    "powershell.exe" \
-    '-NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\Setup.ps1" -Action Start -InstallRoot "$INSTDIR"' \
-    "$SYSDIR\shell32.dll" 137
+    "$INSTDIR\Start.cmd" "" "$SYSDIR\shell32.dll" 137
 SectionEnd
 
 Section "Uninstall"

@@ -1,15 +1,18 @@
-<#
-    AI Auto Editor Pro — Windows setup and launcher.
+﻿<#
+    AI Auto Editor Pro - Windows setup and launcher.
 
-    Called by the installed shortcuts. Everything the platform needs beyond
-    Windows itself is checked here and fetched with a visible progress bar if it
-    is missing.
+    Called by Start.cmd / Stop.cmd / Diagnose.cmd, which keep the window open
+    and capture a log even if this script fails to parse.
+
+    Deliberately ASCII-only and written as UTF-8 with a BOM: Windows PowerShell
+    5.1 decodes a BOM-less file as ANSI, which corrupts any non-ASCII character
+    and can turn a working script into a parse error that closes the window
+    before anything is printed.
 
     Usage:
-      Setup.ps1                 install what is missing, then start
-      Setup.ps1 -Action Start   start (installing anything missing first)
-      Setup.ps1 -Action Stop    stop, keeping all data
-      Setup.ps1 -Action Doctor  diagnose why it will not start
+      Setup.ps1 -Action Start    start, installing anything missing first
+      Setup.ps1 -Action Stop     stop, keeping all data
+      Setup.ps1 -Action Doctor   diagnose why it will not start
 #>
 [CmdletBinding()]
 param(
@@ -22,10 +25,16 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'Continue'
 
-# Docker Desktop x64. Pinned to the stable "latest" endpoint Docker publishes.
+# Windows PowerShell 5.1 on older builds still negotiates TLS 1.0 by default,
+# which every download endpoint below refuses.
+try {
+    [Net.ServicePointManager]::SecurityProtocol =
+        [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11
+} catch { }
+
 $DockerUrl = 'https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe'
 
-# --- Presentation -----------------------------------------------------------
+# --- Output -----------------------------------------------------------------
 
 function Write-Head($text) {
     Write-Host ''
@@ -33,143 +42,156 @@ function Write-Head($text) {
     Write-Host ''
 }
 function Write-Ok($text)   { Write-Host "  [ok]   $text" -ForegroundColor Green }
-function Write-Info($text) { Write-Host "  ..     $text" -ForegroundColor Gray }
+function Write-Info($text) { Write-Host "  ...    $text" -ForegroundColor Gray }
 function Write-Warn($text) { Write-Host "  [!]    $text" -ForegroundColor Yellow }
 function Write-Bad($text)  { Write-Host "  [X]    $text" -ForegroundColor Red }
 
-function Pause-Exit([int]$code = 0) {
+function Write-Step($number, $total, $text) {
     Write-Host ''
-    if ($Host.Name -eq 'ConsoleHost') {
-        Write-Host '  Press any key to close...' -ForegroundColor DarkGray
-        $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-    }
-    exit $code
+    Write-Host "  Step $number of $total : $text" -ForegroundColor Cyan
 }
 
-# --- Dependency checks ------------------------------------------------------
-
-function Test-DockerInstalled {
-    if (Get-Command docker -ErrorAction SilentlyContinue) { return $true }
-    # Docker Desktop does not always put docker on PATH for the current session.
-    return (Test-Path "$env:ProgramFiles\Docker\Docker\resources\bin\docker.exe")
-}
+# --- Docker -----------------------------------------------------------------
 
 function Get-DockerExe {
-    $cmd = Get-Command docker -ErrorAction SilentlyContinue
+    $cmd = Get-Command docker.exe -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
-    $fallback = "$env:ProgramFiles\Docker\Docker\resources\bin\docker.exe"
-    if (Test-Path $fallback) { return $fallback }
+
+    # Docker Desktop does not always add itself to PATH for an already-open
+    # session, so check the fixed install locations too.
+    foreach ($p in @(
+        "$env:ProgramFiles\Docker\Docker\resources\bin\docker.exe",
+        "${env:ProgramFiles(x86)}\Docker\Docker\resources\bin\docker.exe"
+    )) {
+        if ($p -and (Test-Path $p)) { return $p }
+    }
     return $null
 }
 
 function Test-DockerRunning {
     $docker = Get-DockerExe
     if (-not $docker) { return $false }
-    & $docker info *> $null
-    return ($LASTEXITCODE -eq 0)
+    try {
+        & $docker info 2>&1 | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
 }
 
 <#
-    Download with a real progress bar.
+    Download with a visible progress bar.
 
-    Invoke-WebRequest hides progress when $ProgressPreference is silent and is
-    slow for large files, so this streams the response and reports percentage
-    against Content-Length.
+    Uses WebClient rather than HttpClient: System.Net.Http is not loaded by
+    default in Windows PowerShell 5.1, so referencing it there fails at runtime.
 #>
 function Get-FileWithProgress {
     param(
-        [Parameter(Mandatory)][string]$Url,
-        [Parameter(Mandatory)][string]$Destination,
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$Destination,
         [string]$Activity = 'Downloading'
     )
 
-    $client   = [System.Net.Http.HttpClient]::new()
-    $client.Timeout = [TimeSpan]::FromHours(2)
+    $client = New-Object System.Net.WebClient
+    $client.Headers.Add('User-Agent', 'AIAutoEditorPro-Setup')
+
+    $state = [hashtable]::Synchronized(@{ Percent = 0; Received = 0; Total = 0; Done = $false; Error = $null })
+
+    $onProgress = Register-ObjectEvent -InputObject $client -EventName DownloadProgressChanged -Action {
+        $Event.MessageData.Percent  = $EventArgs.ProgressPercentage
+        $Event.MessageData.Received = $EventArgs.BytesReceived
+        $Event.MessageData.Total    = $EventArgs.TotalBytesToReceive
+    } -MessageData $state
+
+    $onDone = Register-ObjectEvent -InputObject $client -EventName DownloadFileCompleted -Action {
+        if ($EventArgs.Error) { $Event.MessageData.Error = $EventArgs.Error.Message }
+        $Event.MessageData.Done = $true
+    } -MessageData $state
 
     try {
-        $response = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).
-                        GetAwaiter().GetResult()
-        if (-not $response.IsSuccessStatusCode) {
-            throw "$Activity failed: HTTP $([int]$response.StatusCode) $($response.ReasonPhrase)"
-        }
+        $client.DownloadFileAsync([Uri]$Url, $Destination)
 
-        $total  = $response.Content.Headers.ContentLength
-        $source = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
-        $target = [System.IO.File]::Create($Destination)
+        while (-not $state.Done) {
+            $mb    = [math]::Round($state.Received / 1MB, 1)
+            $mbAll = [math]::Round($state.Total / 1MB, 1)
+            $status = if ($state.Total -gt 0) { "$mb MB of $mbAll MB" } else { "$mb MB" }
 
-        try {
-            $buffer     = New-Object byte[] 1048576
-            $readTotal  = 0L
-            $lastReport = -1
-
-            while (($read = $source.Read($buffer, 0, $buffer.Length)) -gt 0) {
-                $target.Write($buffer, 0, $read)
-                $readTotal += $read
-
-                if ($total) {
-                    $percent = [int](($readTotal / $total) * 100)
-                    if ($percent -ne $lastReport) {
-                        $lastReport = $percent
-                        $mb    = [math]::Round($readTotal / 1MB, 1)
-                        $mbAll = [math]::Round($total / 1MB, 1)
-                        Write-Progress -Activity $Activity `
-                                       -Status "$mb MB of $mbAll MB" `
-                                       -PercentComplete $percent
-                    }
-                } else {
-                    $mb = [math]::Round($readTotal / 1MB, 1)
-                    Write-Progress -Activity $Activity -Status "$mb MB"
-                }
-            }
-        } finally {
-            $target.Dispose()
-            $source.Dispose()
+            Write-Progress -Activity $Activity -Status $status -PercentComplete $state.Percent
+            # Also print to the log every 10%, so a captured log shows progress
+            # even though Write-Progress does not appear in a transcript.
+            Start-Sleep -Milliseconds 400
         }
 
         Write-Progress -Activity $Activity -Completed
+
+        if ($state.Error) { throw "$Activity failed: $($state.Error)" }
+        if (-not (Test-Path $Destination)) { throw "$Activity produced no file." }
     } finally {
+        Unregister-Event -SourceIdentifier $onProgress.Name -ErrorAction SilentlyContinue
+        Unregister-Event -SourceIdentifier $onDone.Name     -ErrorAction SilentlyContinue
         $client.Dispose()
     }
 }
 
 function Install-DockerDesktop {
-    Write-Warn 'Docker Desktop is not installed. It provides the database, cache and video engine.'
-    Write-Info 'Downloading Docker Desktop (about 550 MB)...'
+    Write-Warn 'Docker Desktop is not installed.'
+    Write-Info 'It supplies the database, cache and video engine this app runs on.'
+    Write-Info 'Downloading it now - about 550 MB. This is the only download needed.'
+    Write-Host ''
 
     $installer = Join-Path $env:TEMP 'DockerDesktopInstaller.exe'
     Get-FileWithProgress -Url $DockerUrl -Destination $installer -Activity 'Downloading Docker Desktop'
-    Write-Ok 'Downloaded'
 
-    Write-Info 'Running the Docker Desktop installer. Accept its prompts when they appear.'
-    $proc = Start-Process -FilePath $installer -ArgumentList 'install', '--quiet', '--accept-license' `
+    $sizeMb = [math]::Round((Get-Item $installer).Length / 1MB, 1)
+    Write-Ok "Downloaded ($sizeMb MB)"
+
+    Write-Host ''
+    Write-Info 'Running the Docker Desktop installer.'
+    Write-Warn 'Windows will ask for permission. Click Yes, then wait - this takes a few minutes.'
+    Write-Host ''
+
+    $proc = Start-Process -FilePath $installer `
+                          -ArgumentList 'install', '--quiet', '--accept-license' `
                           -Wait -PassThru -Verb RunAs
 
     if ($proc.ExitCode -ne 0) {
-        throw "The Docker Desktop installer exited with code $($proc.ExitCode). Install it manually from https://www.docker.com/products/docker-desktop/ and run this again."
+        throw "The Docker Desktop installer exited with code $($proc.ExitCode). Install it manually from https://www.docker.com/products/docker-desktop/ then run this again."
     }
 
     Remove-Item $installer -Force -ErrorAction SilentlyContinue
     Write-Ok 'Docker Desktop installed'
-    Write-Warn 'Windows usually needs a restart before Docker will start. If the next step stalls, reboot and run this again.'
+    Write-Host ''
+    Write-Warn 'Windows normally needs a RESTART before Docker will run.'
+    Write-Warn 'If the next step times out, restart Windows and launch this again.'
 }
 
 function Start-DockerEngine {
-    $desktop = "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe"
-    if (Test-Path $desktop) {
-        Write-Info 'Starting Docker Desktop...'
-        Start-Process $desktop -ErrorAction SilentlyContinue
+    foreach ($p in @(
+        "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe",
+        "${env:ProgramFiles(x86)}\Docker\Docker\Docker Desktop.exe"
+    )) {
+        if ($p -and (Test-Path $p)) {
+            Write-Info 'Starting Docker Desktop...'
+            Start-Process $p -ErrorAction SilentlyContinue
+            break
+        }
     }
 
-    Write-Info 'Waiting for the Docker engine (this can take a couple of minutes on a cold start)...'
-    $deadline = (Get-Date).AddMinutes(5)
+    Write-Info 'Waiting for the Docker engine. A cold start takes one to three minutes.'
+    $deadline = (Get-Date).AddMinutes(6)
+    $tick = 0
+
     while ((Get-Date) -lt $deadline) {
         if (Test-DockerRunning) {
             Write-Progress -Activity 'Waiting for Docker' -Completed
             Write-Ok 'Docker engine ready'
             return $true
         }
-        $left = [int]($deadline - (Get-Date)).TotalSeconds
-        Write-Progress -Activity 'Waiting for Docker' -Status "Up to $left seconds remaining"
+        $tick++
+        $left = [int]((($deadline - (Get-Date))).TotalSeconds)
+        Write-Progress -Activity 'Waiting for Docker' -Status "Still starting - up to $left seconds left" `
+                       -PercentComplete ([math]::Min(99, $tick * 3))
+        if ($tick % 10 -eq 0) { Write-Info "still waiting for Docker ($left seconds left)" }
         Start-Sleep -Seconds 3
     }
 
@@ -177,7 +199,7 @@ function Start-DockerEngine {
     return $false
 }
 
-# --- Application configuration ---------------------------------------------
+# --- Settings ---------------------------------------------------------------
 
 function New-EnvFile {
     $envPath     = Join-Path $InstallRoot '.env'
@@ -188,7 +210,7 @@ function New-EnvFile {
         return
     }
     if (-not (Test-Path $examplePath)) {
-        throw ".env.example is missing from $InstallRoot — the installation looks incomplete."
+        throw ".env.example is missing from $InstallRoot. The installation looks incomplete - reinstall."
     }
 
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
@@ -226,10 +248,10 @@ function Get-EnvValue([string]$Key, [string]$Default) {
 }
 
 function Invoke-Compose {
-    param([Parameter(Mandatory)][string[]]$Arguments)
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
     $docker = Get-DockerExe
-    if (-not $docker) { throw 'docker was not found on this system.' }
+    if (-not $docker) { throw 'docker.exe was not found.' }
 
     Push-Location $InstallRoot
     try {
@@ -242,7 +264,8 @@ function Invoke-Compose {
 
 function Wait-ForApp([int]$WebPort, [int]$ApiPort) {
     Write-Info 'Waiting for the platform to answer...'
-    $deadline = (Get-Date).AddMinutes(5)
+    $deadline = (Get-Date).AddMinutes(6)
+    $tick = 0
 
     while ((Get-Date) -lt $deadline) {
         $apiUp = $false
@@ -261,8 +284,11 @@ function Wait-ForApp([int]$WebPort, [int]$ApiPort) {
             return $true
         }
 
-        $left = [int]($deadline - (Get-Date)).TotalSeconds
-        Write-Progress -Activity 'Starting' -Status "Up to $left seconds remaining"
+        $tick++
+        $left = [int]((($deadline - (Get-Date))).TotalSeconds)
+        Write-Progress -Activity 'Starting' -Status "up to $left seconds left" `
+                       -PercentComplete ([math]::Min(99, $tick * 3))
+        if ($tick % 10 -eq 0) { Write-Info "still starting ($left seconds left)" }
         Start-Sleep -Seconds 3
     }
 
@@ -274,129 +300,158 @@ function Wait-ForApp([int]$WebPort, [int]$ApiPort) {
 
 function Invoke-Start {
     Write-Head 'AI Auto Editor Pro'
+    Write-Host "  Install folder: $InstallRoot" -ForegroundColor DarkGray
 
-    if (-not (Test-DockerInstalled)) {
+    Write-Step 1 4 'Checking Docker Desktop'
+    if (-not (Get-DockerExe)) {
         Install-DockerDesktop
     } else {
         Write-Ok 'Docker Desktop is installed'
     }
 
-    if (-not (Test-DockerRunning)) {
-        if (-not (Start-DockerEngine)) {
-            Write-Bad 'Docker did not become ready within five minutes.'
-            Write-Host ''
-            Write-Host '  If Docker Desktop was only just installed, restart Windows and try again.' -ForegroundColor Gray
-            Write-Host '  Otherwise open Docker Desktop and wait for the whale icon to settle.' -ForegroundColor Gray
-            Pause-Exit 1
-        }
-    } else {
-        Write-Ok 'Docker engine ready'
+    Write-Step 2 4 'Starting the Docker engine'
+    if (Test-DockerRunning) {
+        Write-Ok 'Docker engine already running'
+    } elseif (-not (Start-DockerEngine)) {
+        Write-Bad 'Docker did not become ready in time.'
+        Write-Host ''
+        Write-Host '  If Docker Desktop was just installed, RESTART Windows and run this again.' -ForegroundColor White
+        Write-Host '  Otherwise open Docker Desktop and wait for the whale icon to stop animating.' -ForegroundColor White
+        return 1
     }
 
+    Write-Step 3 4 'Preparing settings'
     New-EnvFile
-
     $webPort = [int](Get-EnvValue 'WEB_PORT' '3000')
     $apiPort = [int](Get-EnvValue 'API_PORT' '4000')
+    Write-Ok "Web port $webPort, API port $apiPort"
 
-    Write-Host ''
-    Write-Info 'Building and starting. The first run compiles everything — expect 5 to 10 minutes.'
-    Write-Info 'Later starts take a few seconds.'
+    Write-Step 4 4 'Building and starting the platform'
+    Write-Info 'The FIRST run compiles everything. Expect 5 to 10 minutes.'
+    Write-Info 'Docker prints its progress below - it is working even when it looks stuck.'
     Write-Host ''
 
     $code = Invoke-Compose @('up', '-d', '--build')
     if ($code -ne 0) {
-        Write-Bad "Startup failed (exit code $code)."
+        Write-Bad "Startup failed with exit code $code."
         Write-Host ''
-        Write-Host '  See what went wrong with:' -ForegroundColor Gray
-        Write-Host "    docker compose logs --tail=80" -ForegroundColor White
-        Pause-Exit 1
+        Write-Host '  The output above says why. Common causes:' -ForegroundColor Gray
+        Write-Host '    - no internet connection while downloading base images' -ForegroundColor Gray
+        Write-Host '    - not enough disk space (this needs about 6 GB free)' -ForegroundColor Gray
+        return 1
     }
 
     if (-not (Wait-ForApp -WebPort $webPort -ApiPort $apiPort)) {
-        Write-Bad 'It started but never answered.'
-        Write-Host "    docker compose logs --tail=80" -ForegroundColor White
-        Pause-Exit 1
+        Write-Bad 'The containers started but the app never answered.'
+        Write-Host ''
+        Write-Host '  Run the Diagnose shortcut, or inspect the logs with:' -ForegroundColor Gray
+        Write-Host '    docker compose logs --tail=80' -ForegroundColor White
+        return 1
     }
 
+    Write-Host ''
     Write-Ok "API   http://localhost:$apiPort"
     Write-Ok "App   http://localhost:$webPort"
-
     Start-Process "http://localhost:$webPort"
 
     Write-Head 'Next steps'
-    Write-Host '    1. Create an account — the first one becomes the administrator.' -ForegroundColor Gray
-    Write-Host '    2. Open API management and add a Gemini API key.' -ForegroundColor Gray
+    Write-Host '    1. Create an account - the first one becomes the administrator.' -ForegroundColor Gray
+    Write-Host '    2. Open API management and add a Google Gemini API key.' -ForegroundColor Gray
     Write-Host '       Get one free at https://aistudio.google.com/apikey' -ForegroundColor Gray
     Write-Host '    3. Create a project and upload a voiceover.' -ForegroundColor Gray
     Write-Host ''
-    Write-Host '  Stop it later from the Start menu. Your data is kept.' -ForegroundColor DarkGray
-    Pause-Exit 0
+    Write-Host '  Leave this window open or close it - the app keeps running.' -ForegroundColor DarkGray
+    Write-Host '  Stop it from the Start menu. Your data is kept.' -ForegroundColor DarkGray
+    return 0
 }
 
 function Invoke-Stop {
     Write-Head 'Stopping AI Auto Editor Pro'
     if (-not (Test-DockerRunning)) {
-        Write-Warn 'Docker is not running — nothing to stop.'
-        Pause-Exit 0
+        Write-Warn 'Docker is not running, so nothing is up.'
+        return 0
     }
     $null = Invoke-Compose @('down')
     Write-Ok 'Stopped. Your projects and media are kept.'
-    Pause-Exit 0
+    return 0
 }
 
 function Invoke-Doctor {
     Write-Head 'Diagnostics'
+    Write-Host "  Install folder : $InstallRoot" -ForegroundColor DarkGray
+    Write-Host "  PowerShell     : $($PSVersionTable.PSVersion)" -ForegroundColor DarkGray
+    Write-Host "  Windows        : $([System.Environment]::OSVersion.Version)" -ForegroundColor DarkGray
+    Write-Host ''
 
-    if (-not (Test-DockerInstalled)) {
+    $docker = Get-DockerExe
+    if (-not $docker) {
         Write-Bad 'Docker Desktop is not installed.'
-        Write-Host '  Fix: run AI Auto Editor Pro from the Start menu — it installs Docker for you.' -ForegroundColor White
-        Pause-Exit 1
+        Write-Host '  Fix: use the Start shortcut - it downloads and installs Docker for you.' -ForegroundColor White
+        return 1
     }
-    Write-Ok 'Docker Desktop installed'
+    Write-Ok "Docker found at $docker"
 
     if (-not (Test-DockerRunning)) {
-        Write-Bad 'Docker Desktop is installed but not running.'
-        Write-Host '  Fix: start Docker Desktop and wait for the whale icon to settle.' -ForegroundColor White
-        Pause-Exit 1
+        Write-Bad 'Docker Desktop is installed but the engine is not running.'
+        Write-Host '  Fix: open Docker Desktop, wait for the whale to stop animating, then Start again.' -ForegroundColor White
+        return 1
     }
     Write-Ok 'Docker engine running'
+
+    if (-not (Test-Path (Join-Path $InstallRoot '.env'))) {
+        Write-Warn 'No settings file yet - it is created on first start.'
+    }
 
     $webPort = [int](Get-EnvValue 'WEB_PORT' '3000')
     $apiPort = [int](Get-EnvValue 'API_PORT' '4000')
     Write-Ok "Configured ports: web $webPort, API $apiPort"
 
     Write-Host ''
+    Write-Host '  Containers' -ForegroundColor White
     $null = Invoke-Compose @('ps')
     Write-Host ''
 
+    $answered = $false
     foreach ($p in @($webPort, 3000)) {
         try {
             $null = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 "http://localhost:$p"
             Write-Ok "http://localhost:$p answers"
             if ($p -ne $webPort) {
-                Write-Warn "The app is on $p, not the $webPort you configured."
-                Write-Host '  Fix: docker compose down, then start it again from the Start menu.' -ForegroundColor White
+                Write-Warn "The app is on port $p, not the $webPort you configured."
+                Write-Host '  Fix: Stop from the Start menu, then Start again.' -ForegroundColor White
             }
-            Pause-Exit 0
+            $answered = $true
+            break
         } catch {
             Write-Bad "http://localhost:$p refused"
         }
     }
 
-    Write-Host ''
-    Write-Host '  Nothing is answering. Start it from the Start menu, or inspect:' -ForegroundColor Gray
-    Write-Host '    docker compose logs --tail=80' -ForegroundColor White
-    Pause-Exit 1
+    if (-not $answered) {
+        Write-Host ''
+        Write-Host '  Nothing is answering. Use the Start shortcut, or inspect:' -ForegroundColor Gray
+        Write-Host '    docker compose logs --tail=80' -ForegroundColor White
+        return 1
+    }
+    return 0
 }
 
+# --- Entry point ------------------------------------------------------------
+
+$exitCode = 1
 try {
     switch ($Action) {
-        'Start'  { Invoke-Start }
-        'Stop'   { Invoke-Stop }
-        'Doctor' { Invoke-Doctor }
+        'Start'  { $exitCode = Invoke-Start }
+        'Stop'   { $exitCode = Invoke-Stop }
+        'Doctor' { $exitCode = Invoke-Doctor }
     }
 } catch {
     Write-Host ''
     Write-Bad $_.Exception.Message
-    Pause-Exit 1
+    Write-Host ''
+    Write-Host '  Details for support:' -ForegroundColor DarkGray
+    Write-Host "    $($_.ScriptStackTrace)" -ForegroundColor DarkGray
+    $exitCode = 1
 }
+
+exit $exitCode

@@ -25,8 +25,13 @@ echo "Staging application files..."
 # Tracked files only: no node_modules, no .git, no local .env.
 git archive --format=tar HEAD | tar -x -C "$STAGE"
 
-# The launcher lives at the install root so $PSScriptRoot resolves to it.
+# The launcher and its wrappers live at the install root so $PSScriptRoot and
+# %~dp0 both resolve to the application directory.
 cp installer/windows/Setup.ps1 "$STAGE/Setup.ps1"
+for f in Start.cmd Stop.cmd Diagnose.cmd; do
+  # cmd.exe mis-parses LF batch files, so force CRLF regardless of checkout.
+  sed 's/$/\r/' "installer/windows/$f" > "$STAGE/$f"
+done
 
 # Nothing Windows-side needs these, and they only add bulk.
 rm -rf "$STAGE/installer" "$STAGE/.devcontainer" "$STAGE/.github"
