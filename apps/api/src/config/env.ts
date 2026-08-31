@@ -57,9 +57,13 @@ const envSchema = z.object({
   // Google retires model ids, and a newly created key is often not offered an
   // older one at all. `model()` treats an empty value as unset so a blank
   // passthrough in docker-compose falls back to the default here.
+  // Verified against a live key's model list. Note that listModels returns
+  // models generateContent will still refuse - the 2.5 family is listed but
+  // rejected for keys created recently - so none of those are used here.
   GEMINI_TEXT_MODEL: model('gemini-3.6-flash'),
-  GEMINI_REASONING_MODEL: model('gemini-3.6-pro'),
-  GEMINI_IMAGE_MODEL: model('gemini-3.6-flash-image'),
+  // No 3.6 pro exists; the alias tracks whatever the current pro model is.
+  GEMINI_REASONING_MODEL: model('gemini-pro-latest'),
+  GEMINI_IMAGE_MODEL: model('gemini-3.1-flash-image'),
   GEMINI_VIDEO_MODEL: model('veo-3.1-generate-preview'),
   GEMINI_TRANSCRIBE_MODEL: model('gemini-3.6-flash'),
   GEMINI_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(1_800_000).default(180_000),
