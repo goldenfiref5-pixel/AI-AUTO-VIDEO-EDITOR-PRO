@@ -370,7 +370,7 @@ export async function analyzeMedia(
           systemInstruction: req.system ? { parts: [{ text: req.system }] } : undefined,
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: req.maxOutputTokens ?? 65_536,
+            maxOutputTokens: req.maxOutputTokens ?? env.GEMINI_MAX_OUTPUT_TOKENS,
             responseMimeType: 'application/json',
           },
         });

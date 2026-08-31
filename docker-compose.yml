@@ -83,6 +83,7 @@ services:
       GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:-}
       GEMINI_VIDEO_MODEL: ${GEMINI_VIDEO_MODEL:-}
       GEMINI_TRANSCRIBE_MODEL: ${GEMINI_TRANSCRIBE_MODEL:-}
+      GEMINI_MAX_OUTPUT_TOKENS: ${GEMINI_MAX_OUTPUT_TOKENS:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - media-storage:/app/storage
@@ -131,6 +132,7 @@ services:
       GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:-}
       GEMINI_VIDEO_MODEL: ${GEMINI_VIDEO_MODEL:-}
       GEMINI_TRANSCRIBE_MODEL: ${GEMINI_TRANSCRIBE_MODEL:-}
+      GEMINI_MAX_OUTPUT_TOKENS: ${GEMINI_MAX_OUTPUT_TOKENS:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - media-storage:/app/storage

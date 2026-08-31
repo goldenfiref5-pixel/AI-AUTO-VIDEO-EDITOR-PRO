@@ -7,6 +7,17 @@ const bool = (fallback: boolean) =>
     .optional()
     .transform((v) => (v === undefined || v === '' ? fallback : ['1', 'true', 'yes', 'on'].includes(v.toLowerCase())));
 
+/**
+ * Treats an empty string as absent, so a blank docker-compose passthrough falls
+ * back to the default instead of failing validation and crash-looping the
+ * container.
+ */
+const numeric = (fallback: number) =>
+  z.preprocess(
+    (v) => (v === undefined || v === null || String(v).trim() === '' ? fallback : v),
+    z.coerce.number().int(),
+  );
+
 /** Treats an empty string as absent, so a blank passthrough uses the default. */
 const model = (fallback: string) =>
   z
@@ -66,6 +77,10 @@ const envSchema = z.object({
   GEMINI_IMAGE_MODEL: model('gemini-3.1-flash-image'),
   GEMINI_VIDEO_MODEL: model('veo-3.1-generate-preview'),
   GEMINI_TRANSCRIBE_MODEL: model('gemini-3.6-flash'),
+  // Output ceiling for the long-form calls. Asking for more than a model
+  // allows is rejected as INVALID_ARGUMENT, and the limit varies per model, so
+  // this stays conservative and tunable rather than assuming a large budget.
+  GEMINI_MAX_OUTPUT_TOKENS: numeric(32_768),
   GEMINI_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(1_800_000).default(180_000),
   GEMINI_VIDEO_POLL_INTERVAL_MS: z.coerce.number().int().min(1_000).default(10_000),
   GEMINI_VIDEO_TIMEOUT_MS: z.coerce.number().int().min(30_000).default(900_000),

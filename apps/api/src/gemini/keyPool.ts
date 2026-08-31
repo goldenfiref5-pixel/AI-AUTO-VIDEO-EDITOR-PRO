@@ -305,15 +305,18 @@ export async function testApiKey(keyId: string, userId: string): Promise<ApiKeyT
       .filter((name) => !name.includes('embedding'))
       .sort();
 
-    // listModels succeeds even on quota-exhausted keys, so do a 1-token
+    // listModels succeeds even on quota-exhausted keys, so do a tiny
     // generation to prove the key can actually produce content.
+    //
+    // Deliberately minimal: no thinkingConfig (Gemini 3 models reject
+    // thinkingBudget 0 outright with INVALID_ARGUMENT) and no tight output cap
+    // (a thinking model spends output tokens before it emits any text, so a
+    // handful of tokens truncates before the first character). The point is to
+    // prove the key generates, not to shave a fraction of a cent.
     await client.generateContent(
       env.GEMINI_TEXT_MODEL,
-      {
-        contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
-        generationConfig: { maxOutputTokens: 8, temperature: 0, thinkingConfig: { thinkingBudget: 0 } },
-      },
-      20_000,
+      { contents: [{ role: 'user', parts: [{ text: 'ping' }] }] },
+      30_000,
     );
 
     message = `Key is valid. ${models.length} models available, responded in ${latencyMs}ms.`;

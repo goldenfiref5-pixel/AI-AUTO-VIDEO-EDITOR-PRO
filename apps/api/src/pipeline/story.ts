@@ -128,7 +128,7 @@ export async function analyzeStory(input: StoryAnalysisInput): Promise<StoryPlan
         system: STORY_ANALYSIS_SYSTEM,
         model: env.GEMINI_REASONING_MODEL,
         temperature: 0.6,
-        maxOutputTokens: 32_768,
+        maxOutputTokens: env.GEMINI_MAX_OUTPUT_TOKENS,
       },
     );
 
