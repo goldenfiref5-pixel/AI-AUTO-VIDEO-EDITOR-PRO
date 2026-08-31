@@ -51,6 +51,46 @@ function Write-Step($number, $total, $text) {
     Write-Host "  Step $number of $total : $text" -ForegroundColor Cyan
 }
 
+<#
+    Turn off the console's QuickEdit mode.
+
+    With QuickEdit on (the Windows default), a single click inside the window
+    puts it into selection mode, which SUSPENDS the running process until the
+    user presses Escape. During a ten-minute build that looks exactly like a
+    hang, and there is nothing on screen to say otherwise.
+#>
+function Disable-ConsoleQuickEdit {
+    try {
+        if (-not ('ConsoleMode' -as [type])) {
+            Add-Type -Namespace Win32 -Name ConsoleMode -MemberDefinition @'
+[DllImport("kernel32.dll", SetLastError = true)]
+public static extern IntPtr GetStdHandle(int nStdHandle);
+
+[DllImport("kernel32.dll", SetLastError = true)]
+public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+[DllImport("kernel32.dll", SetLastError = true)]
+public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+'@
+        }
+
+        $STD_INPUT_HANDLE       = -10
+        $ENABLE_QUICK_EDIT_MODE = 0x0040
+        $ENABLE_EXTENDED_FLAGS  = 0x0080
+
+        $handle = [Win32.ConsoleMode]::GetStdHandle($STD_INPUT_HANDLE)
+        $mode = 0
+        if (-not [Win32.ConsoleMode]::GetConsoleMode($handle, [ref]$mode)) { return }
+
+        # Clearing QuickEdit only takes effect when the extended flag is set.
+        $new = ($mode -band (-bnot $ENABLE_QUICK_EDIT_MODE)) -bor $ENABLE_EXTENDED_FLAGS
+        [void][Win32.ConsoleMode]::SetConsoleMode($handle, $new)
+    } catch {
+        # Not fatal: the worst case is the old click-to-freeze behaviour, which
+        # the on-screen warning covers.
+    }
+}
+
 # --- Docker -----------------------------------------------------------------
 
 function Get-DockerExe {
@@ -451,8 +491,14 @@ function Wait-ForApp([int]$WebPort, [int]$ApiPort) {
 # --- Actions ----------------------------------------------------------------
 
 function Invoke-Start {
+    Disable-ConsoleQuickEdit
+
     Write-Head 'AI Auto Editor Pro'
     Write-Host "  Install folder: $InstallRoot" -ForegroundColor DarkGray
+    Write-Host ''
+    Write-Host '  Do NOT click inside this window while it works.' -ForegroundColor Yellow
+    Write-Host '  On Windows a click pauses the process. If the title bar ever shows' -ForegroundColor DarkGray
+    Write-Host '  "Select", press Escape to resume.' -ForegroundColor DarkGray
 
     Write-Step 1 4 'Checking Docker Desktop'
     if (-not (Get-DockerExe)) {
@@ -502,6 +548,7 @@ function Invoke-Start {
     Write-Step 4 4 'Building and starting the platform'
     Write-Info 'The FIRST run compiles everything. Expect 5 to 10 minutes.'
     Write-Info 'Docker prints its progress below - it is working even when it looks stuck.'
+    Write-Warn 'Do not click in this window. A click pauses it (title shows "Select"; press Escape).'
     Write-Host ''
 
     $code = Invoke-Compose @('up', '-d', '--build')
